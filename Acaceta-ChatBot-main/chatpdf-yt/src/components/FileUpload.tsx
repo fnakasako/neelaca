@@ -8,22 +8,20 @@ import axios from "axios";
 import { toast } from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
-// https://github.com/aws/aws-sdk-js-v3/issues/4126
-
 const FileUpload = () => {
   const router = useRouter();
   const [uploading, setUploading] = React.useState(false);
   const { mutate, isLoading } = useMutation({
     mutationFn: async ({
-      file_key,
-      file_name,
+      file_keys,
+      file_names,
     }: {
-      file_key: string;
-      file_name: string;
+      file_keys: string[];
+      file_names: string[];
     }) => {
       const response = await axios.post("/api/create-chat", {
-        file_key,
-        file_name,
+        file_keys,
+        file_names,
       });
       return response.data;
     },
@@ -31,27 +29,33 @@ const FileUpload = () => {
 
   const { getRootProps, getInputProps } = useDropzone({
     accept: { "application/pdf": [".pdf"] },
-    maxFiles: 1,
+    maxFiles: 10, // Allow multiple files
     onDrop: async (acceptedFiles) => {
-      const file = acceptedFiles[0];
-      if (file.size > 10 * 1024 * 1024) {
-        // bigger than 10mb!
-        toast.error("File too large");
+      if (acceptedFiles.some(file => file.size > 10 * 1024 * 1024)) {
+        toast.error("One or more files are too large");
         return;
       }
 
       try {
         setUploading(true);
-        const data = await uploadToS3(file);
-        console.log("meow", data);
-        if (!data?.file_key || !data.file_name) {
+        const uploadPromises = acceptedFiles.map(file => uploadToS3(file));
+        const uploadResults = await Promise.all(uploadPromises);
+
+        const file_keys = uploadResults.map(result => result.file_key);
+        const file_names = uploadResults.map(result => result.file_name);
+
+        if (!file_keys.length || !file_names.length) {
           toast.error("Something went wrong");
           return;
         }
-        mutate(data, {
-          onSuccess: ({ chat_id }) => {
+
+        console.log('Sending file_keys:', file_keys);
+        console.log('Sending file_names:', file_names);
+
+        mutate({ file_keys, file_names }, {
+          onSuccess: ({ chat_ids }) => {
             toast.success("Chat created!");
-            router.push(`/chat/${chat_id}`);
+            router.push(`/chat/${chat_ids[0]}`); // Redirect to the first chat id for simplicity
           },
           onError: (err) => {
             toast.error("Error creating chat");
@@ -65,6 +69,7 @@ const FileUpload = () => {
       }
     },
   });
+
   return (
     <div className="p-2 bg-white rounded-xl">
       <div
@@ -73,19 +78,16 @@ const FileUpload = () => {
             "border-dashed border-2 rounded-xl cursor-pointer bg-gray-50 py-8 flex justify-center items-center flex-col",
         })}
       >
-        <input {...getInputProps()} />
+        <input {...getInputProps()} multiple />
         {uploading || isLoading ? (
           <>
-            {/* loading state */}
             <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
-            <p className="mt-2 text-sm text-slate-400">
-              Spilling Tea to GPT...
-            </p>
+            <p className="mt-2 text-sm text-slate-400">Spilling Tea to GPT...</p>
           </>
         ) : (
           <>
             <Inbox className="w-10 h-10 text-blue-500" />
-            <p className="mt-2 text-sm text-slate-400">Drop PDF Here</p>
+            <p className="mt-2 text-sm text-slate-400">Drop PDFs Here</p>
           </>
         )}
       </div>

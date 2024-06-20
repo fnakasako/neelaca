@@ -2,32 +2,32 @@ import { Pinecone } from "@pinecone-database/pinecone";
 import { convertToAscii } from "./utils";
 import { getEmbeddings } from "./embeddings";
 
-export async function getMatchesFromEmbeddings(
-  embeddings: number[],
-  fileKey: string
-) {
-  try {
-    const client = new Pinecone({
-      /*environment: process.env.PINECONE_ENVIRONMENT!, */
-      apiKey: process.env.PINECONE_API_KEY!,
-    });
-    const pineconeIndex = await client.index("chatpdf-yt");
-    const namespace = pineconeIndex.namespace(convertToAscii(fileKey));
-    const queryResult = await namespace.query({
-      topK: 5,
-      vector: embeddings,
-      includeMetadata: true,
-    });
-    return queryResult.matches || [];
-  } catch (error) {
-    console.log("error querying embeddings", error);
-    throw error;
+export async function getMatchesFromEmbeddings(embeddings, fileKeys) {
+  const client = new Pinecone({
+    apiKey: process.env.PINECONE_API_KEY!,
+  });
+  const pineconeIndex = await client.index("chatpdf-yt");
+  const allMatches = [];
+
+  for (const fileKey of fileKeys) {
+    try {
+      const namespace = pineconeIndex.namespace(convertToAscii(fileKey));
+      const queryResult = await namespace.query({
+        topK: 5,
+        vector: embeddings,
+        includeMetadata: true,
+      });
+      allMatches.push(...(queryResult.matches || []));
+    } catch (error) {
+      console.log(`Error querying embeddings for fileKey: ${fileKey}`, error);
+    }
   }
+  return allMatches;
 }
 
-export async function getContext(query: string, fileKey: string) {
+export async function getContext(query, fileKeys) {
   const queryEmbeddings = await getEmbeddings(query);
-  const matches = await getMatchesFromEmbeddings(queryEmbeddings, fileKey);
+  const matches = await getMatchesFromEmbeddings(queryEmbeddings, fileKeys);
 
   const qualifyingDocs = matches.filter(
     (match) => match.score && match.score > 0.7

@@ -5,7 +5,6 @@ import { getS3Url } from "@/lib/s3";
 import { auth } from "@clerk/nextjs";
 import { NextResponse } from "next/server";
 
-// /api/create-chat
 export async function POST(req: Request, res: Response) {
   const { userId } = await auth();
   if (!userId) {
@@ -13,24 +12,41 @@ export async function POST(req: Request, res: Response) {
   }
   try {
     const body = await req.json();
-    const { file_key, file_name } = body;
-    console.log(file_key, file_name);
-    await loadS3IntoPinecone(file_key);
-    const chat_id = await db
+    let { file_keys, file_names } = body; // Expecting arrays of file keys and names
+
+    console.log("Received file_keys:", file_keys);
+    console.log("Received file_names:", file_names);
+
+    if (!Array.isArray(file_keys)) {
+      file_keys = [file_keys];
+    }
+    if (!Array.isArray(file_names)) {
+      file_names = [file_names];
+    }
+
+    console.log("Validated file_keys:", file_keys);
+    console.log("Validated file_names:", file_names);
+
+    const fileDataPromises = file_keys.map(async (file_key, index) => {
+      const file_name = file_names[index];
+      await loadS3IntoPinecone(file_key);
+      const pdfUrl = getS3Url(file_key);
+      return { fileKey: file_key, pdfName: file_name, pdfUrl, userId };
+    });
+
+    const fileData = await Promise.all(fileDataPromises);
+    const chatEntries = await db
       .insert(chats)
-      .values({
-        fileKey: file_key,
-        pdfName: file_name,
-        pdfUrl: getS3Url(file_key),
-        userId,
-      })
+      .values(fileData)
       .returning({
         insertedId: chats.id,
       });
 
+    const chatIds = chatEntries.map(entry => entry.insertedId);
+
     return NextResponse.json(
       {
-        chat_id: chat_id[0].insertedId,
+        chat_ids: chatIds,
       },
       { status: 200 }
     );
